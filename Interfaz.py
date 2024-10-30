@@ -5,12 +5,46 @@ import numpy as np
 import pandas as pd
 from gamspy import Container, Set, Parameter, Variable, Equation, Model, Sum, Sense, Alias, Ord, Card
 from copy import deepcopy
+from streamlit_option_menu import option_menu
+import openrouteservice
+import folium
+from folium.plugins import BeautifyIcon
+from streamlit_folium import folium_static
+
+page_bg_img = f"""
+<style>
+[data-testid="stAppViewContainer"] {{
+    background-image: url("https://htmlcolorcodes.com/assets/images/colors/pastel-blue-color-solid-background-1920x1080.png");
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}}
+
+[data-testid="stHeader"] {{
+    background: rgba(0, 0, 0, 0);
+}}
+
+[data-testid="stSidebar"] > div:first-child {{
+    background: rgba(0, 0, 0, 0);
+}}
+</style>
+"""
+
+st.markdown(page_bg_img, unsafe_allow_html=True)
+
+if 'show_map' not in st.session_state:
+    st.session_state.show_map = False
+
+if 'generated_map' not in st.session_state:
+    st.session_state.generated_map = None  # Store the generated map
 
 st.title('CLAIO Interfaz, La buena :]')
 
 
 # Cargar DataFrame con las distancias entre cada lugar
 datos = pd.read_csv('distancias.csv')
+coordenadas=pd.read_csv("Coordenadas.csv")
 
 # Se crea una función para transformar el formato del dataframe
 @st.cache_data
@@ -72,8 +106,10 @@ places= pd.read_csv("pesos3.csv")
 
 lugares_mas_nodos=places.iloc[:,[0,1]]
 
+
 @st.cache_data
 def nodos_a_lugares(camino):
+    lista_lugares=[]
     contador=0
     for i in camino:
         #print(i)  
@@ -82,6 +118,7 @@ def nodos_a_lugares(camino):
         for _, row in lugares_mas_nodos.iterrows():
             if origen == row['Nodo']:
                 #print(origen)
+                lista_lugares.append(row[0])
                 st.text(row[0])  
                 break 
 
@@ -93,7 +130,68 @@ def nodos_a_lugares(camino):
         contador+=1
     if contador == len(camino):
         st.text(lugares_mas_nodos.iloc[0,0])
+        lista_lugares.append(row[0])
+    return lista_lugares
+
+@st.cache_data
+def hacer_mapa(lista_de_lugares,coordenadas):
+    client = openrouteservice.Client(key='5b3ce3597851110001cf62483186b48d61624dabb6ad7a24c27aaae5')
+    contador = 0
+    latitud = []
+    longitud = []
+
+    # Crear un mapa inicial
+    mapa = folium.Map(location=[20.5, -87.3], zoom_start=10)  # Ajusta la ubicación y el zoom según sea necesario
+
+    for i in lista_de_lugares:
+        # Filtrar las coordenadas del lugar
+        filtro = coordenadas[coordenadas['Lugar'] == i]
+        lat = float(filtro['Lat'].values[0])
+        lon = float(filtro['Lng'].values[0])
+
+        latitud.append(lat)
+        longitud.append(lon)
         
+        # Añadir marcador del lugar con BeautifyIcon
+        folium.Marker(
+            location=[lat, lon],
+            popup=i,
+            icon=BeautifyIcon(
+                icon="arrow-down",  # Icono de flecha hacia abajo
+                icon_shape="marker",  # Forma del icono
+                number=str(contador+1),  # Número del contador
+                background_color='purple',  # Color de fondo
+                border_color="#000000",  # Color del borde
+                text_color="white"  # Color del texto
+            )
+        ).add_to(mapa)
+
+        if contador > 0:
+            # Asegúrate de que las coordenadas se pasen en el orden correcto: (lon, lat)
+            ruta = client.directions(
+                coordinates=[(longitud[contador-1], latitud[contador-1]), (longitud[contador], latitud[contador])],
+                profile='foot-walking',
+                format='geojson'
+            )
+            # Dibujar la ruta en el mapa
+            folium.GeoJson(
+                ruta,
+                style_function=lambda feature: {
+                    'color': 'blue',
+                    'weight': 4,
+                    'opacity': 0.7,
+                },
+                name='Ruta'
+            ).add_to(mapa)
+
+        contador += 1
+
+    # Añadir el control de capas al mapa y guardar el archivo HTML
+    folium.LayerControl().add_to(mapa)
+    folium_static(mapa)
+
+
+
 
 
 lugares = list(range(1, datos.shape[0]+1))
@@ -312,8 +410,16 @@ def ejecutar_proceso(tabla,tiempLug,tiempo_max,costosLug,weights,presupuesto_max
       print("Camino ordenado:", camino)
       
       #st.text(camino)
-      nodos_a_lugares(camino)
+      lugares_visitados=nodos_a_lugares(camino)
 
+
+      
+      #lugares_visitados
+      if st.checkbox('Mostrar mapa',key=_,):
+        st.subheader(f'Mapa de dia: '+ str(_+1))
+        st.session_state.generated_map = hacer_mapa(lugares_visitados, coordenadas)
+
+        
 
       # Ciclo for para borrar en el DataFrame tabla y en tiempLug los nodos visitados
       for indice in camino:
@@ -370,29 +476,24 @@ tiempLug = [['1',0],['2',60],['3',60],['4',120],['5',120],['6',120],['7',120],['
 costosLug = [['1',0],['2',60],['3',60],['4',120],['5',120],['6',120],['7',120],['8',120],['9',120],['10',60],['11',60],['12',45],['13',90],['14',300],['15',120],['16',90],['17',60],['18',120],['19',60],['20',60]]
 
 st.subheader("Elige tu tipo de actividad favorita")
+actividades = [ "1. Cenote", "2. Playas", "3. Parques","4. Culturales"]
 
-st.markdown("1- Cenote")
-st.markdown("2- Playas")
-st.markdown("3- Parques")
-st.markdown("4- Culturales")
+role = st.selectbox("Actividades disponibles", actividades)
 
-st.markdown('''
-<style>
-[data-testid="stMarkdownContainer"] ul{
-    padding-left:10px;
-}
-</style>
-''', unsafe_allow_html=True)
+act = actividades.index(role) + 1
 
-act=st.number_input("1-4",min_value=1, max_value=4, step=1)
-act = int(act)
+st.write(f"Has seleccionado la actividad : {role}")
+
 
 weights = transformar_pesos(act)
 
+
+
+
 tiempo_dia=st.number_input(
-    '''Elige el tiempo máximo que puedes destinar para ser turista cada día
+    '''Elige el tiempo máximo que puedes destinar para ser turista cada día (en horas)
 ''',min_value=1,step=1)
-tiempo_max = int(tiempo_dia)
+tiempo_max = int(tiempo_dia) *60
 
 
 
@@ -405,26 +506,13 @@ numero_de_dias = st.number_input(
     "Elige la cantidad de días de tus vacaciones",min_value=1,step=1)
 numero_de_dias = int(numero_de_dias)
 
-#page_bg_img = f"""
-#<style>
-#[data-testid="stAppViewContainer"] > .main {{
-#background-image: url("https://htmlcolorcodes.com/assets/images/colors/pastel-blue-color-solid-background-1920x1080.png");
-#background-size: cover;
-#background-position: center center;
-#background-repeat: no-repeat;
-#background-attachment: local;
-#}}
-#[data-testid="stHeader"] {{
-#background: rgba(0,0,0,0);
-#}}
-#</style>
-#"""
-#st.markdown(page_bg_img, unsafe_allow_html=True)
 
 
 
 tabla_modificada = ejecutar_proceso(tabla,tiempLug,tiempo_max,costosLug,weights,presupuesto_max,numero_de_dias)
 
 
-st.subheader('Mapa de rutas turisticas')
-st.map()
+
+
+
+
